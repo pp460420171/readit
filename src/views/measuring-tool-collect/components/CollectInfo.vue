@@ -15,6 +15,7 @@ const isMeasuring = ref(false);
 const target = ref(0);
 const min = ref(0);
 const max = ref(0);
+const tool = ref("");
 
 const handleClick = () => {
   if (isMeasuring.value) {
@@ -24,7 +25,10 @@ const handleClick = () => {
   }
 };
 window.myApi.handleMsg((event: any, res: any) => {
-  if (res) data.value.push(res);
+  if (res) {
+    data.value.push(res.data[0]);
+    tool.value = res.sn[0];
+  }
 });
 </script>
 
@@ -38,7 +42,7 @@ window.myApi.handleMsg((event: any, res: any) => {
         ]"
       >
         <span v-if="!isMeasuring">等待测量</span>
-        <span v-else="isMeasuring">测量中</span>
+        <span v-else="isMeasuring">测量中</span><span>--{{ tool }}</span>
       </div>
       <div
         class="h-28 flex items-center justify-center"

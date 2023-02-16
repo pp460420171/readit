@@ -23,6 +23,14 @@ const menu = ref({
       title: "专用设备数据采集",
       icon: "el-icon-camera",
       children: [
+        {
+          title: "设置FTP客户端",
+          path: "set-ftp-client",
+        },
+        {
+          title: "文件上传",
+          path: "upload-file",
+        },
         { title: "数据采集", path: "/page5" },
         { title: "数据历史", path: "/page6" },
       ],

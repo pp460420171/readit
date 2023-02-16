@@ -1,5 +1,10 @@
-const { BrowserWindow, app, ipcMain } = require("electron");
+const { BrowserWindow, app, ipcMain, dialog } = require("electron");
 const { uIOhook } = require("uiohook-napi");
+const PromiseFtp = require("promise-ftp");
+const fs = require("fs");
+const { foperator } = require("./js/folder.operation.cjs");
+const ftp = new PromiseFtp();
+
 const UiohookKeyOfDarwin = {
   Backspace: 14,
   Tab: 15,
@@ -254,12 +259,13 @@ const UiohookKeyOfWin32 = {
 const WinState = require("electron-win-state").default;
 const path = require("path");
 const preload = path.resolve(__dirname, "./preload/index.js");
+let win;
 const createWindow = () => {
   const winState = new WinState({
     defaultWidth: 800,
     defaultHeight: 600,
   });
-  const win = new BrowserWindow({
+  win = new BrowserWindow({
     ...winState.winOptions,
     webPreferences: {
       // nodeIntegration: true
@@ -331,3 +337,124 @@ ipcMain.handle("stop-listener", () => {
 
   return "stopped";
 });
+ipcMain.handle("start-ftp", (event, args) => {
+  startFtp(JSON.parse(args));
+});
+ipcMain.handle("stop-ftp", (event) => {
+  stopFtp();
+});
+
+ipcMain.handle("select-local-folder", (event) => {
+  console.log("select-local-folder");
+  dialog
+    .showOpenDialog(win, {
+      properties: ["openDirectory"],
+    })
+    .then((result) => {
+      if (result.canceled) {
+        console.log("Dialog was canceled");
+      } else {
+        const file = result.filePaths[0];
+        win.webContents.send("fill-folder-address", file);
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+    });
+});
+ipcMain.handle("upload-file", (event, args) => {
+  let fileDirectory = args.folder;
+  if (fs.existsSync(fileDirectory)) {
+    let paths = foperator.getPaths(fileDirectory);
+    console.log(paths);
+    let pathLen = paths.length;
+
+    if (!pathLen) {
+      win.webContents.send("ftp-log", [
+        "warning",
+        " 所选的本地文件夹暂时没有文件。",
+      ]);
+      return;
+    }
+    let dirLen = ~~fileDirectory.length;
+    for (var i = 0; i < pathLen; i++) {
+      let srcPath = paths[i];
+      let destPathStr = srcPath.substr(dirLen);
+      let destPath = destPathStr.replace(/\\/g, "/");
+
+      let dirPath = path.dirname(destPath);
+      let filename = path.basename(destPath);
+      console.log(destPath, dirPath, filename);
+      ftp
+        .put(srcPath, destPath)
+        .then(function () {
+          win.webContents.send("ftp-log", ["success", " upload " + srcPath]);
+        })
+        .catch(function (err) {
+          console.log(err);
+
+          win.webContents.send("ftp-log", [
+            "error",
+            srcPath + "上传FTP服务器失败。",
+          ]);
+        });
+    }
+  } else {
+    win.webContents.send("ftp-log", ["warning", " 所选的本地文件夹不存在。"]);
+    return;
+  }
+});
+
+const startFtp = (args) => {
+  ftp
+    .connect(args)
+    .then(function (serverMessage) {
+      // 状态分为not yet connected/connecting/connected/logging out/disconnecting/disconnected/reconnecting
+      let timerCount = 0;
+      win.webContents.send("ftp-log", ["warning", "正在链接FTP服务器"]);
+      let contnectTimer = setInterval(() => {
+        console.log("正在链接FTP服务器");
+        win.webContents.send("ftp-log", ["warning", "正在链接FTP服务器"]);
+        if (ftp.getConnectionStatus() == "connected") {
+          console.log("成功链接FTP服务器。");
+          win.webContents.send("ftp-log", ["success", serverMessage]);
+          win.webContents.send("ftp-log", ["success", "成功链接FTP服务器。"]);
+          clearInterval(contnectTimer);
+        } else {
+          ++timerCount;
+          if (timerCount < 6) {
+            clearInterval(contnectTimer);
+            console.log("未链接FTP服务器，请检查网络及FTP配置信息。");
+            win.webContents.send("ftp-log", [
+              "error",
+              "未链接FTP服务器，请检查网络及配置信息。",
+            ]);
+          }
+        }
+      }, 2000);
+    })
+    .catch(function (a) {
+      if (ftp.getConnectionStatus() == "connected") {
+        console.log("已连接,无需重复连接");
+        win.webContents.send("ftp-log", ["warning", "已连接,无需重复连接"]);
+      } else {
+        console.log("未链接FTP服务器，请检查网络及FTP配置信息。");
+        win.webContents.send("ftp-log", [
+          "error",
+          "未链接FTP服务器，请检查网络及FTP配置信息。",
+        ]);
+      }
+    });
+};
+
+const stopFtp = () => {
+  if (ftp.getConnectionStatus() == "connected") {
+    ftp.end();
+    console.log("关闭FTP服务链接");
+    win.webContents.send("ftp-log", ["success", "关闭FTP服务链接"]);
+    console.info(ftp.getConnectionStatus());
+  } else {
+    console.log("未链接FTP服务器");
+    win.webContents.send("ftp-log", ["error", "未链接FTP服务器"]);
+  }
+};
